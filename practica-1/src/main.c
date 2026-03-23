@@ -12,9 +12,9 @@ int main(int argc, char *argv[])
 	}
 
 	NFA nfa;
-	Init_NFA(&nfa);
+	NFA_Init(&nfa);
 
-	Fill_NFA_From_File(&nfa, afnFile);
+	NFA_Load(&nfa, afnFile);
 
 	while (true) {
 		printf("Input: ");
@@ -26,7 +26,7 @@ int main(int argc, char *argv[])
 		
 		line[n - 1] = '\0';
 
-		if (accepts(&nfa, line))
+		if (NFA_Accepts(&nfa, line))
 			printf("Accepts\n");
 		else
 			printf("Doesn't accept\n");

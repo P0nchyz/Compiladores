@@ -2,10 +2,11 @@
 #define NFA_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
-#include "vector.h"
+#include "vector/vector.h"
 
-typedef char Symbol;
+typedef unsigned char Symbol;
 #define MAX_ALPHABET_SIZE 256
 
 #define MAX_STATE_ID_SIZE 3
@@ -20,7 +21,7 @@ typedef struct {
 
 typedef struct {
 	Symbol symbol;
-	int to_id;
+	size_t to_id;
 } Transition;
 
 typedef struct {
@@ -28,11 +29,12 @@ typedef struct {
 
 	bool isInAlphabet[MAX_ALPHABET_SIZE]; // Σ
 
-	int initialState_id; // S
+	size_t initialState_id; // S
 } NFA;
-void Init_NFA(NFA *nfa);
-void Fill_NFA_From_File(NFA *nfa, FILE* file);
 
-bool accepts(NFA *nfa, char *string);
+void NFA_Init(NFA *nfa);
+void NFA_Load(NFA *nfa, FILE* file);
+
+bool NFA_Accepts(const NFA *nfa, char *string);
 
 #endif

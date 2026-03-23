@@ -1,6 +1,6 @@
 #include "memory.h"
 
-void *proj_memcpy(void *dest, const void *src, unsigned int count)
+void *proj_memcpy(void *dest, const void *src, size_t count)
 {
 	unsigned char *d = dest;
 	const unsigned char *s = (const unsigned char *)src;
@@ -11,7 +11,7 @@ void *proj_memcpy(void *dest, const void *src, unsigned int count)
 	return d;
 }
 
-void *proj_memset(void *dest, unsigned char ch, unsigned int count)
+void *proj_memset(void *dest, unsigned char ch, size_t count)
 {
 	unsigned char *d = dest;
 
