@@ -16,7 +16,8 @@ static void parseFLine(const NFA *nfa, const char *line);
 static void parseDeltaLine(const NFA *nfa, const char *line);
 
 static State State_Init(StateID id);
-static void copy_StateID(const char *src, int end, StateID *out);
+static int parseNextToken(const char **cursor, StateID *ret);
+static int parseNextAlphabet(const char **cursor, Symbol *ret);
 
 static bool eq_StateID(const StateID A, const StateID B);
 static bool eq_State(const void *a, const void *b);
@@ -38,6 +39,7 @@ void NFA_Init(NFA *nfa)
 
 bool NFA_Accepts(const NFA *nfa, char *string)
 {
+	// Puts initial state in array to match Get_Epsilon_Closure
 	Vector initialState_vector;
 	Vector_Init(&initialState_vector, sizeof(size_t));
 	Vector_Push(&initialState_vector, &nfa->initialState_id);
@@ -173,68 +175,42 @@ void NFA_Load(NFA *nfa, FILE *file)
 
 static void parseQLine(NFA *nfa, const char *line)
 {
-	int start = 0;
-	int end = 0;
-	int i = 0;
-
+	const char *cursor = line;
+	StateID s;
 	while (true) {
-		if (line[i] == ',' || line[i] == '\0') {
-			StateID s = {0};
-			copy_StateID(&line[start], end, &s);
+		int parseStatus = parseNextToken(&cursor, &s);
+		State newState = State_Init(s);
 
-			State newState = State_Init(s);
-
-			if (Vector_Find(&nfa->states, &newState, eq_State) != -1) {
-				fprintf(stderr, "Repeated states in Q\n");
-				exit(1);
-			}
-
-			Vector_Push(&nfa->states, &newState);
-
-			if (line[i] == '\0')
-				break;
-
-			start = i + 1;
-			end = -1;
+		if (Vector_Find(&nfa->states, &newState, eq_State) != -1) {
+			fprintf(stderr, "Repeated states in Q\n");
+			exit(1);
 		}
-		end++;
-		i++;
+
+		Vector_Push(&nfa->states, &newState);
+		if (parseStatus != 0) return;
 	}
 }
 
 static void parseAlphabetLine(NFA *nfa, const char *line)
 {
-	int i = 0;
-
-	while (line[i] != '\0') {
-		Symbol c = (Symbol)line[i];
-		if (i % 2 == 0) {
-			if (nfa->isInAlphabet[c]) {
-				fprintf(stderr, "Duplicate symbols in alphabet\n");
-				exit(2);
-			}
-			nfa->isInAlphabet[c] = true;
-		} else {
-			if (c != ',') {
-				fprintf(stderr, "Alphabet formated incorrectly\n");
-				exit(2);
-			}
+	const char *cursor = line;
+	Symbol s;
+	while (true) {
+		int parseStatus = parseNextAlphabet(&cursor, &s);
+		if (nfa->isInAlphabet[s]) {
+			fprintf(stderr, "Duplicate symbols in alphabet\n");
+			exit(2);
 		}
-		i++;
+		nfa->isInAlphabet[s] = true;
+		if (parseStatus != 0) return;
 	}
 }
 
 static void parseSLine(NFA *nfa, const char *line)
 {
+	const char *cursor = line;
 	State initialStateDummy;
-
-	size_t i = 0;
-
-	for (; i < MAX_STATE_ID_SIZE && line[i] != '\0'; i++) {
-		initialStateDummy.id[i] = line[i];
-	}
-
-	initialStateDummy.id[i] = line[i];
+	parseNextToken(&cursor, &initialStateDummy.id);
 
 	ssize_t initialState_id = Vector_Find(&nfa->states, &initialStateDummy, eq_State);
 	if (initialState_id == -1) {
@@ -247,48 +223,40 @@ static void parseSLine(NFA *nfa, const char *line)
 
 static void parseFLine(const NFA *nfa, const char *line)
 {
-	int start = 0;
-	int i = 0;
-
+	const char *cursor = line;
+	State dummyState;
 	while (true) {
-		if (line[i] == ',' || line[i] == '\0') {
-			State dummyState;
-			copy_StateID(&line[start], i, &dummyState.id);
-
-			ssize_t finalState_id = Vector_Find(&nfa->states, &dummyState, eq_State);
-			if (finalState_id == -1) {
-				fprintf(stderr, "Final state %s is not in Q\n", dummyState.id);
-				exit(1);
-			}
-
-			State *stateRef = Vector_Get(&nfa->states, (size_t)finalState_id);
-
-			stateRef->isAccept = true;
-
-			if (line[i] == '\0')
-				break;
-
-			start = i + i;
+		int parseStatus = parseNextToken(&cursor, &dummyState.id);
+		ssize_t finalState_id = Vector_Find(&nfa->states, &dummyState, eq_State);
+		if (finalState_id == -1) {
+			fprintf(stderr, "Final state %s is not in Q\n", dummyState.id);
+			exit(2);
 		}
-		i++;
+
+		State *stateRef = Vector_Get(&nfa->states, (size_t)finalState_id);
+
+		stateRef->isAccept = true;
+
+		if (parseStatus != 0) return;
 	}
 }
 
 static void parseDeltaLine(const NFA *nfa, const char *line)
 {
+	const char *cursor = line;
 	State fromDummy, toDummy;
-	char symbolBuffer[2];
 	Symbol symbol;
 
-	sscanf(line, "%3[^,],%1[^.],%3s", fromDummy.id, symbolBuffer, toDummy.id);
-
-	symbol = (Symbol)symbolBuffer[0];
+	parseNextToken(&cursor, &fromDummy.id);
+	parseNextAlphabet(&cursor, &symbol);
+	parseNextToken(&cursor, &toDummy.id);
 
 	ssize_t from_id = Vector_Find(&nfa->states, &fromDummy, eq_State);
 	if (from_id == -1) {
 		fprintf(stderr, "State %s in delta was not defined\n", fromDummy.id);
 		exit(2);
 	}
+
 	ssize_t to_id = Vector_Find(&nfa->states, &toDummy, eq_State);
 	if (to_id == -1) {
 		fprintf(stderr, "State %s in delta was not defined\n", toDummy.id);
@@ -308,14 +276,6 @@ static void parseDeltaLine(const NFA *nfa, const char *line)
 		}
 		Vector_Push(&fromState->transitions, &newTransition);
 	}
-}
-
-static void copy_StateID(const char *src, int end, StateID *out)
-{
-	int i = 0;
-	for (; i < end && i < MAX_STATE_ID_SIZE; i++)
-		(*out)[i] = src[i];
-	(*out)[i] = '\0';
 }
 
 static bool eq_StateID(const StateID A, const StateID B)
@@ -356,4 +316,146 @@ static State State_Init(StateID id)
 	Vector_Init(&retState.transitions, sizeof(Transition));
 
 	return retState;
+}
+
+/**
+ * @brief Parse the next token from a string into a StateID.
+ *
+ * A token is a string of 1-MAX_STATE_ID_SIZE characters after unescaping.
+ * Escapable characters are ',' and '\'.
+ *
+ * Tokens are separated by commas. A comma terminates the current token (unless escaped).
+ * '\0' and '\n' terminate the input.
+ *
+ * Advances the input cursor past the parsed token and its delimiter.
+ *
+ * @param cursor Pointer to the current position in the input string. Updated to point past the
+ * parsed token.
+ * @param ret Output parameter where the parsed StateID is stored.
+ *
+ * @return Parsing status.
+ * @retval 0 Token successfully parsed, more tokens may follow.
+ * @retval 1 Token successfully parsed, and it was the last token.
+ */
+static int parseNextToken(const char **cursor, StateID *ret)
+{
+	size_t usable_count = 0;
+	bool escaped_flag = false;
+	for (;; (*cursor)++) {
+		char readChar = **cursor;
+
+		if (readChar == '\0' || readChar == '\n') {
+			if (usable_count == 0) {
+				fprintf(stderr, "parseNextToken: Couldn't parse token\n");
+				exit(1);
+			} else if (escaped_flag) {
+				fprintf(stderr, "parseNextToken: Dangling escape\n");
+				exit(1);
+			} else {
+				(*ret)[usable_count] = '\0';
+				(*cursor)++;
+				return 1;
+			}
+		}
+
+		if (escaped_flag) {
+			if (readChar == ',' || readChar == '\\') {
+				(*ret)[usable_count] = readChar;
+				usable_count++;
+				escaped_flag = false;
+
+				if (usable_count > MAX_STATE_ID_SIZE) {
+					fprintf(stderr, "parseNextToken: Token longer than %d\n",
+						MAX_STATE_ID_SIZE);
+					exit(1);
+				}
+			} else {
+				fprintf(stderr,
+					"parseNextToken: Escaped non-escapable character\n");
+				exit(1);
+			}
+		} else if (readChar == ',') {
+			if (usable_count == 0) {
+				fprintf(stderr, "parseNextToken: Couldn't parse token\n");
+				exit(1);
+			} else {
+				(*ret)[usable_count] = '\0';
+				(*cursor)++;
+				return 0;
+			}
+		} else if (readChar == '\\') {
+			escaped_flag = true;
+		} else {
+			(*ret)[usable_count] = readChar;
+			usable_count++;
+			if (usable_count > MAX_STATE_ID_SIZE) {
+				fprintf(stderr, "parseNextToken: Token longer than %d\n",
+					MAX_STATE_ID_SIZE);
+				exit(1);
+			}
+		}
+	}
+}
+
+static int parseNextAlphabet(const char **cursor, Symbol *ret)
+{
+	bool escaped = false;
+	bool haveChar = false;
+	char value = '\0';
+
+	for (;; (*cursor)++) {
+		char c = **cursor;
+
+		if (c == '\0' || c == '\n') {
+			if (escaped) {
+				fprintf(stderr, "parseNextAlphabet: Dangling escape\n");
+				exit(1);
+			}
+
+			if (!haveChar) {
+				*ret = '\0';
+			} else {
+				*ret = (Symbol)value;
+			}
+			return 1;
+		}
+
+		if (escaped) {
+			if (haveChar) {
+				fprintf(stderr, "parseNextAlphabet: Too many characters\n");
+				exit(1);
+			}
+
+			if (c == ',' || c == '\\') {
+				value = c;
+			} else if (c == 'n') {
+				value = '\n';
+			} else {
+				fprintf(stderr,
+					"parseNextToken: Escaped non-escapable character\n");
+				exit(1);
+			}
+
+			haveChar = true;
+			escaped = false;
+		} else if (c == '\\') {
+			escaped = true;
+		} else if (c == ',') {
+			if (!haveChar) {
+				*ret = '\0';
+			} else {
+				*ret = (Symbol)value;
+			}
+			(*cursor)++;
+			return 0;
+		} else {
+			if (haveChar) {
+				fprintf(stderr, "parseNextToken: Too many characters\n");
+				exit(1);
+			}
+
+			value = c;
+			haveChar = true;
+		}
+	}
 }

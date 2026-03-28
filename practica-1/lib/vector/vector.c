@@ -24,8 +24,7 @@ void Vector_Init(Vector *v, size_t elem_size)
 	v->elem_size = elem_size;
 	v->data = malloc(v->capacity * elem_size);
 
-	if (!v->data)
-	{
+	if (!v->data) {
 		fprintf(stderr, "Vector allocation failed\n");
 		exit(1);
 	}
@@ -63,8 +62,7 @@ int Vector_Pop(Vector *v, void *out)
 
 void *Vector_Get(const Vector *v, size_t index)
 {
-	if (index >= v->size)
-	{
+	if (index >= v->size) {
 		fprintf(stderr, "Index out of bounds\n");
 		exit(1);
 	}
@@ -73,8 +71,7 @@ void *Vector_Get(const Vector *v, size_t index)
 
 void Vector_Get_Copy(const Vector *v, size_t index, void *out)
 {
-	if (index >= v->size)
-	{
+	if (index >= v->size) {
 		fprintf(stderr, "Index out of bounds\n");
 		exit(1);
 	}
@@ -111,8 +108,7 @@ void Vector_Free(Vector *v)
 
 ssize_t Vector_Find(const Vector *v, const void *key, VectorPredicate pred)
 {
-	for (size_t i = 0; i < v->size; i++)
-	{
+	for (size_t i = 0; i < v->size; i++) {
 		void *elem = (char *)v->data + i * v->elem_size;
 
 		if (pred(elem, key))

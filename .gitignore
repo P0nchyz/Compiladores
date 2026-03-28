@@ -1,0 +1,57 @@
+# Build directories
+build/
+bin/
+out/
+
+# Object files
+*.o
+*.obj
+
+# Dependency files
+*.d
+
+# Static / dynamic libraries
+*.a
+*.so
+*.so.*
+*.dll
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Debug symbols
+*.dSYM/
+*.su
+
+# Core dumps
+core
+core.*
+*.stackdump
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Coverage / profiling
+*.gcda
+*.gcno
+*.gcov
+gmon.out
+
+# Logs
+*.log
+
+### Custom ###
+.cache/
+*.test
+compile_commands.json
