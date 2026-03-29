@@ -20,6 +20,7 @@ typedef struct {
 } State;
 
 typedef struct {
+	size_t from_id;
 	Symbol symbol;
 	size_t to_id;
 } Transition;
@@ -35,6 +36,6 @@ typedef struct {
 void NFA_Init(NFA *nfa);
 void NFA_Load(NFA *nfa, FILE* file);
 
-bool NFA_Accepts(const NFA *nfa, char *string);
+bool NFA_Accepts(const NFA *nfa, const char *string);
 
 #endif

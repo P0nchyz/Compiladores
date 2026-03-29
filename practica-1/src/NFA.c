@@ -6,8 +6,14 @@
 #include "NFA.h"
 #include "vector/vector.h"
 
-static Vector Get_Epsilon_Closure(const NFA *nfa, Vector states_id);
-static Vector move(const NFA *nfa, Vector states_id, Symbol symbol);
+typedef struct {
+	Transition transition;
+	ssize_t parent_index;
+} PathNode;
+
+static Vector Get_Epsilon_Closure(const NFA *nfa, Vector input_indices, Vector *path_history);
+static Vector move(const NFA *nfa, Vector current_indices, Symbol symbol, Vector *path_history);
+static bool Print_Path(const NFA *nfa, Vector *path_history, ssize_t current_idx);
 
 static void parseQLine(NFA *nfa, const char *line);
 static void parseAlphabetLine(NFA *nfa, const char *line);
@@ -21,7 +27,6 @@ static int parseNextAlphabet(const char **cursor, Symbol *ret);
 
 static bool eq_StateID(const StateID A, const StateID B);
 static bool eq_State(const void *a, const void *b);
-static bool eq_Int(const void *a, const void *b);
 
 void NFA_Init(NFA *nfa)
 {
@@ -37,109 +42,164 @@ void NFA_Init(NFA *nfa)
 	nfa->initialState_id = 0;
 }
 
-bool NFA_Accepts(const NFA *nfa, char *string)
+bool NFA_Accepts(const NFA *nfa, const char *string)
 {
-	// Puts initial state in array to match Get_Epsilon_Closure
-	Vector initialState_vector;
-	Vector_Init(&initialState_vector, sizeof(size_t));
-	Vector_Push(&initialState_vector, &nfa->initialState_id);
+	Vector path_history;
+	Vector_Init(&path_history, sizeof(PathNode));
 
-	Vector currentStates_id = Get_Epsilon_Closure(nfa, initialState_vector);
+	PathNode root = {.transition = {
+		.from_id = 0, .symbol = 0, .to_id = nfa->initialState_id},
+		.parent_index = -1
+	};
+	ssize_t inital_idx = (ssize_t)Vector_Push(&path_history, &root);
 
-	Vector_Free(&initialState_vector);
+	Vector initial_indices;
+	Vector_Init(&initial_indices, sizeof(ssize_t));
+	Vector_Push(&initial_indices, &inital_idx);
+
+	Vector current_indices = Get_Epsilon_Closure(nfa, initial_indices, &path_history);
+	Vector_Free(&initial_indices);
 
 	for (int i = 0; string[i]; i++) {
-		Vector moveStates = move(nfa, currentStates_id, (Symbol)string[i]);
-		Vector_Free(&currentStates_id);
-		currentStates_id = Get_Epsilon_Closure(nfa, moveStates);
+		Vector moved = move(nfa, current_indices, (Symbol)string[i], &path_history);
+		Vector_Free(&current_indices);
 
-		Vector_Free(&moveStates);
-
-		if (Vector_IsEmpty(&currentStates_id)) {
-			Vector_Free(&currentStates_id);
+		if (Vector_IsEmpty(&moved)) {
+			Vector_Free(&moved);
 			return false;
 		}
+
+		current_indices = Get_Epsilon_Closure(nfa, moved, &path_history);
+		Vector_Free(&moved);
 	}
 
-	for (size_t i = 0; i < Vector_Size(&currentStates_id); i++) {
-		size_t currentState_id;
-		Vector_Get_Copy(&currentStates_id, i, &currentState_id);
-		State currentState;
-		Vector_Get_Copy(&nfa->states, currentState_id, &currentState);
+	bool accepted = false;
+	for (size_t i = 0; i < Vector_Size(&current_indices); i++) {
+		ssize_t history_idx;
+		Vector_Get_Copy(&current_indices, i, &history_idx);
 
-		if (currentState.isAccept) {
-			Vector_Free(&currentStates_id);
-			return true;
+		PathNode *end_node = Vector_Get(&path_history, (size_t)history_idx);
+
+		State s;
+		Vector_Get_Copy(&nfa->states, end_node->transition.to_id, &s);
+
+		if (s.isAccept) {
+			accepted = true;
+			Print_Path(nfa, &path_history, history_idx);
+			printf("\n");
 		}
 	}
 
-	Vector_Free(&currentStates_id);
+	Vector_Free(&current_indices);
+	Vector_Free(&path_history);
+	return accepted;
+}
+
+static bool Print_Path(const NFA *nfa, Vector *path_history, ssize_t current_idx)
+{
+	if (current_idx == -1)
+		return true;
+
+	PathNode *node = Vector_Get(path_history, (size_t)current_idx);
+
+	if (node->parent_index == -1)
+		return true;
+
+	bool parent_isDummy = Print_Path(nfa, path_history, node->parent_index);
+
+	State fromState;
+	Vector_Get_Copy(&nfa->states, node->transition.from_id, &fromState);
+	State toState;
+	Vector_Get_Copy(&nfa->states, node->transition.to_id, &toState);
+
+	Symbol symbol = node->transition.symbol;
+
+	if (!parent_isDummy) {
+		printf("--'%c'->(%s)", symbol, toState.id);
+	} else {
+		printf("(%s)--'%c'->(%s)", fromState.id, symbol, toState.id);
+	}
+
 	return false;
 }
 
-static Vector Get_Epsilon_Closure(const NFA *nfa, Vector states_id)
+static Vector Get_Epsilon_Closure(const NFA *nfa, const Vector input_indices, Vector *path_history)
 {
-	Vector epsilon_closure;
-	Vector_Init(&epsilon_closure, sizeof(size_t));
+	Vector closure_indices;
+	Vector_Init(&closure_indices, sizeof(ssize_t));
+
 	Vector stack;
-	Vector_Init(&stack, sizeof(size_t));
+	Vector_Init(&stack, sizeof(ssize_t));
 
-	for (size_t i = 0; i < Vector_Size(&states_id); i++) {
-		size_t current_id;
-		Vector_Get_Copy(&states_id, i, &current_id);
+	bool *visited = calloc(Vector_Size(&nfa->states), sizeof(*visited));
 
-		Vector_Push(&epsilon_closure, &current_id);
-		Vector_Push(&stack, &current_id);
+	// input_indices already part of epsilon_closure
+	for (size_t i = 0; i < Vector_Size(&input_indices); i++) {
+		ssize_t idx;
+		Vector_Get_Copy(&input_indices, i, &idx);
+
+		PathNode *n = Vector_Get(path_history, (size_t)idx);
+		visited[n->transition.to_id] = true;
+
+		Vector_Push(&closure_indices, &idx);
+		Vector_Push(&stack, &idx);
 	}
 
 	while (!Vector_IsEmpty(&stack)) {
-		size_t reachableStack_id;
-		Vector_Pop(&stack, &reachableStack_id);
+		ssize_t curr_idx;
+		Vector_Pop(&stack, &curr_idx);
 
-		State currentState;
-		Vector_Get_Copy(&nfa->states, reachableStack_id, &currentState);
-		for (size_t i = 0; i < Vector_Size(&currentState.epsilon_transitions); i++) {
-			Transition tempTransition;
-			Vector_Get_Copy(&currentState.epsilon_transitions, i, &tempTransition);
+		PathNode *curr_node = Vector_Get(path_history, (size_t)curr_idx);
 
-			ssize_t tempTransitionIndex =
-				Vector_Find(&epsilon_closure, &tempTransition.to_id, eq_Int);
-			if (tempTransitionIndex == -1) {
-				Vector_Push(&epsilon_closure, &tempTransition.to_id);
-				Vector_Push(&stack, &tempTransition.to_id);
+		State s;
+		Vector_Get_Copy(&nfa->states, curr_node->transition.to_id, &s);
+
+		// Find all epsilon transitions and add to history if not already in closure
+		for (size_t i = 0; i < Vector_Size(&s.epsilon_transitions); i++) {
+			Transition t;
+			Vector_Get_Copy(&s.epsilon_transitions, i, &t);
+
+			if (!visited[t.to_id]) {
+				visited[t.to_id] = true;
+
+				PathNode eps_node = {.transition = t, .parent_index = curr_idx};
+				size_t new_idx = Vector_Push(path_history, &eps_node);
+				Vector_Push(&closure_indices, &new_idx);
+				Vector_Push(&stack, &new_idx);
 			}
 		}
 	}
-
 	Vector_Free(&stack);
-
-	return epsilon_closure;
+	return closure_indices;
 }
 
-static Vector move(const NFA *nfa, Vector states_id, Symbol symbol)
+static Vector move(const NFA *nfa, const Vector current_indices, Symbol symbol, Vector *pathHistory)
 {
-	Vector result;
-	Vector_Init(&result, sizeof(int));
+	Vector result_indices;
+	Vector_Init(&result_indices, sizeof(ssize_t));
 
-	for (size_t i = 0; i < Vector_Size(&states_id); i++) {
-		size_t state_id;
-		Vector_Get_Copy(&states_id, i, &state_id);
+	for (size_t i = 0; i < Vector_Size(&current_indices); i++) {
+		ssize_t parent_idx;
+		Vector_Get_Copy(&current_indices, i, &parent_idx);
+
+		PathNode *parent_node = Vector_Get(pathHistory, (size_t)parent_idx);
 
 		State currentState;
-		Vector_Get_Copy(&nfa->states, state_id, &currentState);
+		Vector_Get_Copy(&nfa->states, parent_node->transition.to_id, &currentState);
 
 		for (size_t j = 0; j < Vector_Size(&currentState.transitions); j++) {
 			Transition t;
 			Vector_Get_Copy(&currentState.transitions, j, &t);
+
 			if (t.symbol == symbol) {
-				if (Vector_Find(&result, &t.to_id, eq_Int) == -1) {
-					Vector_Push(&result, &t.to_id);
-				}
+				PathNode new_step = {.transition = t, .parent_index = parent_idx};
+				size_t new_idx = Vector_Push(pathHistory, &new_step);
+				Vector_Push(&result_indices, &new_idx);
 			}
 		}
 	}
 
-	return result;
+	return result_indices;
 }
 
 void NFA_Load(NFA *nfa, FILE *file)
@@ -187,7 +247,8 @@ static void parseQLine(NFA *nfa, const char *line)
 		}
 
 		Vector_Push(&nfa->states, &newState);
-		if (parseStatus != 0) return;
+		if (parseStatus != 0)
+			return;
 	}
 }
 
@@ -202,7 +263,8 @@ static void parseAlphabetLine(NFA *nfa, const char *line)
 			exit(2);
 		}
 		nfa->isInAlphabet[s] = true;
-		if (parseStatus != 0) return;
+		if (parseStatus != 0)
+			return;
 	}
 }
 
@@ -237,7 +299,8 @@ static void parseFLine(const NFA *nfa, const char *line)
 
 		stateRef->isAccept = true;
 
-		if (parseStatus != 0) return;
+		if (parseStatus != 0)
+			return;
 	}
 }
 
@@ -263,7 +326,8 @@ static void parseDeltaLine(const NFA *nfa, const char *line)
 		exit(2);
 	}
 
-	Transition newTransition = {.to_id = (size_t)to_id, .symbol = symbol};
+	Transition newTransition = {
+		.from_id = (size_t)from_id, .symbol = symbol, .to_id = (size_t)to_id};
 
 	State *fromState = Vector_Get(&nfa->states, (size_t)from_id);
 
@@ -293,15 +357,6 @@ static bool eq_State(const void *a, const void *b)
 	const State StateB = *(const State *)b;
 
 	return eq_StateID(StateA.id, StateB.id);
-}
-
-static bool eq_Int(const void *a, const void *b)
-{
-	const int intA = *(const int *)a;
-
-	const int intB = *(const int *)b;
-
-	return intA == intB;
 }
 
 static State State_Init(StateID id)
